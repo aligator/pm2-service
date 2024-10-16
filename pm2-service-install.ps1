@@ -127,10 +127,14 @@ if($null -eq $pm2version){
     & npm config --global set prefix ("$pm2Path\npm" -replace '\\','/')
     & npm config --global set cache  ("$pm2Path\npm-cache" -replace '\\','/')
 
-    Write-host "pm2 install @jessety/pm2-logrotate"
-        & pm2 install @jessety/pm2-logrotate
-    Write-host "pm2 save"
-        & pm2 save
+    # TODO: 
+    # https://stackoverflow.com/questions/61970999/pm2-logrotate-install-on-offline-linux-machine
+    if(-not $IsOffline) {
+        Write-host "pm2 install @jessety/pm2-logrotate"
+            & pm2 install @jessety/pm2-logrotate
+        Write-host "pm2 save"
+            & pm2 save
+    }
 }
 else {
     Write-host "PM2 $pm2version is already installed. You must uninstall PM2 to proceed."
