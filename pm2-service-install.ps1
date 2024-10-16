@@ -1,4 +1,7 @@
-﻿
+function refreshenv {
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") 
+}
+
 # check Administrator privileges
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin=$currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -16,32 +19,29 @@ Set-ExecutionPolicy Bypass -Scope Process -Force;
 # Use TLS 1.2
 [System.Net.ServicePointManager]::SecurityProtocol = 3072;
 
-# refreshenv (an alias for Update-SessionEnvironment) is generally the right 
-# command to use to update the current session with environment-variable changes
-# after a choco install ... command.
-# https://stackoverflow.com/questions/46758437/how-to-refresh-the-environment-of-a-powershell-session-after-a-chocolatey-instal
-try
-{
-    Write-host "Downloading choco ..."
-    Set-ExecutionPolicy Bypass -Scope Process -Force; 
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; 
-    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-    Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
-    $env:ChocolateyInstall = Convert-Path "$((Get-Command choco).Path)\..\.."   
-    Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"  
-    # Disable Chocolatey's Confirmation Prompt
-    choco feature enable -n allowGlobalConfirmation  
-} catch {
-    Write-Host "download chocolatey failed,check you network pls."
-    return
+$wingetversion=$null
+try { $wingetversion=winget -v } catch {}
+if($null -eq $wingetversion){
+    # Install VCLibs
+    Add-AppxPackage 'https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx'
+
+    # Install Microsoft.UI.Xaml (latest) from NuGet
+    Invoke-WebRequest -Uri https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/ -OutFile .\microsoft.ui.xaml.zip
+    Expand-Archive .\microsoft.ui.xaml.zip
+    Add-AppxPackage .\microsoft.ui.xaml\tools\AppX\x64\Release\Microsoft.UI.Xaml.2.8.appx
+
+    # Install the latest release of Microsoft.DesktopInstaller from GitHub
+    Invoke-WebRequest -Uri https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle -OutFile .\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
+    Add-AppxPackage .\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
 }
+refreshenv
 
 $nodeversion=$null
 try { $nodeversion=node -v } catch {}
 if($null -eq $nodeversion){
     # Write-host "Node.js must be installed. "
     Write-host "installing Node.js ..."
-    choco install nodejs-lts
+    winget install OpenJS.NodeJS
 }
 refreshenv
 
@@ -80,6 +80,8 @@ if($null -eq $pm2version){
 
     Write-host "npm install pm2"
     & npm install pm2
+    
+
     refreshenv    
 
     $sysPath = [Environment]::GetEnvironmentVariable('Path','Machine')
