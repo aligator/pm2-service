@@ -13,35 +13,48 @@ else {
     return
 }
 
+$OfflineFolder = '.\offline'
+$IsOffline = Test-Path -Path $OfflineFolder
+if ($IsOffline) {
+    "Running in offline mode since the '$OfflineFolder' exists."
+}
+
 # Allow Execution of Foreign Scripts
 Set-ExecutionPolicy Bypass -Scope Process -Force;
 
-# Use TLS 1.2
-[System.Net.ServicePointManager]::SecurityProtocol = 3072;
+if (-not $IsOffline) {
+    # Use TLS 1.2
+    [System.Net.ServicePointManager]::SecurityProtocol = 3072;
 
-$wingetversion=$null
-try { $wingetversion=winget -v } catch {}
-if($null -eq $wingetversion){
-    # Install VCLibs
-    Add-AppxPackage 'https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx'
+    $wingetversion=$null
+    try { $wingetversion=winget -v } catch {}
+    if($null -eq $wingetversion){
+        # Install VCLibs
+        Add-AppxPackage 'https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx'
 
-    # Install Microsoft.UI.Xaml (latest) from NuGet
-    Invoke-WebRequest -Uri https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/ -OutFile .\microsoft.ui.xaml.zip
-    Expand-Archive .\microsoft.ui.xaml.zip
-    Add-AppxPackage .\microsoft.ui.xaml\tools\AppX\x64\Release\Microsoft.UI.Xaml.2.8.appx
+        # Install Microsoft.UI.Xaml (latest) from NuGet
+        Invoke-WebRequest -Uri https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/ -OutFile .\microsoft.ui.xaml.zip
+        Expand-Archive .\microsoft.ui.xaml.zip
+        Add-AppxPackage .\microsoft.ui.xaml\tools\AppX\x64\Release\Microsoft.UI.Xaml.2.8.appx
 
-    # Install the latest release of Microsoft.DesktopInstaller from GitHub
-    Invoke-WebRequest -Uri https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle -OutFile .\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
-    Add-AppxPackage .\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
+        # Install the latest release of Microsoft.DesktopInstaller from GitHub
+        Invoke-WebRequest -Uri https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle -OutFile .\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
+        Add-AppxPackage .\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
+    }
+    refreshenv
 }
-refreshenv
 
 $nodeversion=$null
 try { $nodeversion=node -v } catch {}
 if($null -eq $nodeversion){
     # Write-host "Node.js must be installed. "
     Write-host "installing Node.js ..."
-    winget install OpenJS.NodeJS
+
+    if ($IsOffline) {
+        Start-Process -Wait -FilePath ".\offline\nodejs.msi" -ArgumentList "/quiet /norestart" -PassThru
+    } else {
+        winget install OpenJS.NodeJS
+    }
 }
 refreshenv
 
@@ -63,7 +76,6 @@ $pm2Path="$env:ProgramData\pm2-etc"
 try { $pm2version=pm2 -v } catch {}
 
 if($null -eq $pm2version){
-    Write-host "online install pm2 ..."
 
     if(-not (Test-Path $pm2Path) ){
         mkdir -Path "$pm2Path"
@@ -74,13 +86,19 @@ if($null -eq $pm2version){
         Set-Acl -Path "$pm2Path" -AclObject $newAcl        
     }
     Set-Location -Path $pm2Path
-    
-    Write-host "npm config get registry"
-    & npm config get registry
 
-    Write-host "npm install pm2"
-    & npm install pm2
-    
+    if ($IsOffline) {
+        Write-host "offline install pm2 ..."
+        Copy-Item -Recurse -Path "$PSScriptRoot\offline\pm2\*" -Destination $pm2Path
+    } else {
+        Write-host "online install pm2 ..."
+
+        Write-host "npm config get registry"
+        & npm config get registry
+
+        Write-host "npm install pm2"
+        & npm install pm2
+    }   
 
     refreshenv    
 
@@ -110,7 +128,9 @@ if($null -eq $pm2version){
     & npm config --global set cache  ("$pm2Path\npm-cache" -replace '\\','/')
 
     Write-host "pm2 install @jessety/pm2-logrotate"
-    & pm2 install @jessety/pm2-logrotate
+        & pm2 install @jessety/pm2-logrotate
+    Write-host "pm2 save"
+        & pm2 save
 }
 else {
     Write-host "PM2 $pm2version is already installed. You must uninstall PM2 to proceed."
@@ -139,7 +159,11 @@ Add-Content -Path "$pm2Path\service\pm2service.ps1" -Value $serviceCode
 Write-Host "downloading WinSW ..."
 try
 {
-    Invoke-WebRequest "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET4.exe" -OutFile "$pm2Path\service\pm2service.exe"
+    if ($IsOffline) {
+        Copy-Item -Path "$PSScriptRoot\offline\WinSW.NET4.exe" -Destination "$pm2Path\service\pm2service.exe"
+    } else {
+        Invoke-WebRequest "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET4.exe" -OutFile "$pm2Path\service\pm2service.exe"
+    }
 } catch {
     $StatusCode = $_.Exception.Response.StatusCode.value__
     Write-Host "download StatusCode code: $StatusCode"
