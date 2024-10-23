@@ -13,16 +13,16 @@ else {
     return
 }
 
-$OfflineFolder = '.\offline'
-$IsOffline = Test-Path -Path $OfflineFolder
-if ($IsOffline) {
-    "Running in offline mode since the '$OfflineFolder' exists."
+$offlineFolder = $offlineFolder = (Get-Item '.\offline').FullName
+$isOffline = Test-Path -Path $offlineFolder
+if ($isOffline) {
+    "Running in offline mode since the folder '$offlineFolder' exists."
 }
 
 # Allow Execution of Foreign Scripts
 Set-ExecutionPolicy Bypass -Scope Process -Force;
 
-if (-not $IsOffline) {
+if (-not $isOffline) {
     # Use TLS 1.2
     [System.Net.ServicePointManager]::SecurityProtocol = 3072;
 
@@ -44,17 +44,19 @@ if (-not $IsOffline) {
     refreshenv
 }
 
-$nodeversion=$null
-try { $nodeversion=node -v } catch {}
-if($null -eq $nodeversion){
-    # Write-host "Node.js must be installed. "
-    Write-host "installing Node.js ..."
-
-    if ($IsOffline) {
-        Start-Process -Wait -FilePath ".\offline\nodejs.msi" -ArgumentList "/quiet /norestart" -PassThru
-    } else {
-        winget install OpenJS.NodeJS
+if ($isOffline) {
+    $nodeversion=$null
+    try { $nodeversion=node -v } catch {}
+    Write-host "Install Nodejs from offline package"
+    if($null -ne $nodeversion){
+        Write-host "Uninstall old Nodejs first"
+        $app = Get-WmiObject -Class Win32_Product | Where-Object { $_.Name -match "Node.js" }
+        $app.Uninstall()
     }
+
+    Start-Process "msiexec.exe" -ArgumentList "/I `"$offlineFolder\nodejs.msi`" /qn" -Wait -NoNewWindow 
+} else {
+    winget install OpenJS.NodeJS
 }
 refreshenv
 
@@ -87,9 +89,9 @@ if($null -eq $pm2version){
     }
     Set-Location -Path $pm2Path
 
-    if ($IsOffline) {
+    if ($isOffline) {
         Write-host "offline install pm2 ..."
-        Copy-Item -Recurse -Path "$PSScriptRoot\offline\pm2\*" -Destination $pm2Path
+        Copy-Item -Recurse -Path "$offlineFolder\pm2\*" -Destination $pm2Path
     } else {
         Write-host "online install pm2 ..."
 
@@ -127,9 +129,21 @@ if($null -eq $pm2version){
     & npm config --global set prefix ("$pm2Path\npm" -replace '\\','/')
     & npm config --global set cache  ("$pm2Path\npm-cache" -replace '\\','/')
 
-    # TODO: 
     # https://stackoverflow.com/questions/61970999/pm2-logrotate-install-on-offline-linux-machine
-    if(-not $IsOffline) {
+    if($isOffline) {
+        Write-host "install pm2 logrotate offline"
+
+        Set-Location -Path "$pm2Path\.pm2\modules"
+        tar -xzvf "$offlineFolder\logrotate.tar.gz"
+        & pm2 module:generate pm2-logrotate
+        Set-Location -Path "$pm2Path\.pm2\modules\pm2-logrotate"
+        
+        Write-host "pm2 install ."
+            & pm2 install .
+        
+        Write-host "pm2 save"
+            & pm2 save
+    } else {
         Write-host "pm2 install @jessety/pm2-logrotate"
             & pm2 install @jessety/pm2-logrotate
         Write-host "pm2 save"
@@ -160,21 +174,23 @@ Add-Content -Path "$pm2Path\service\pm2service.ps1" -Value $serviceCode
 
 
 # download WinSW (Windows Service Wrapper)
-Write-Host "downloading WinSW ..."
-try
-{
-    if ($IsOffline) {
-        Copy-Item -Path "$PSScriptRoot\offline\WinSW.NET4.exe" -Destination "$pm2Path\service\pm2service.exe"
-    } else {
+if ($isOffline) {
+    Write-Host "install WinSW offline ..."
+    Copy-Item -Path "$offlineFolder\WinSW.NET4.exe" -Destination "$pm2Path\service\pm2service.exe"
+} else {
+    try
+    {
+        Write-Host "downloading WinSW ..."
         Invoke-WebRequest "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET4.exe" -OutFile "$pm2Path\service\pm2service.exe"
+    } catch {
+        $StatusCode = $_.Exception.Response.StatusCode.value__
+        Write-Host "download StatusCode code: $StatusCode"
     }
-} catch {
-    $StatusCode = $_.Exception.Response.StatusCode.value__
-    Write-Host "download StatusCode code: $StatusCode"
 }
 
+
 if(-not(Test-Path "$pm2Path\service\pm2service.exe")){
-    Write-Host "download failed,check you network pls."
+    Write-Host "installation failed"
     return
 }
 
@@ -191,7 +207,7 @@ $serviceConfig=@"
     <arguments>-File "%BASE%\pm2service.ps1"</arguments>
 </service>
 "@
-Add-Content -Path "$pm2Path\service\pm2service.xml" -Value $serviceConfig
+Set-Content -Path "$pm2Path\service\pm2service.xml" -Value $serviceConfig
 
 Set-Location "$pm2Path\service"
 & ./pm2service.exe Install
