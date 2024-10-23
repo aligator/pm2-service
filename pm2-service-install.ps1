@@ -113,7 +113,13 @@ if($null -eq $pm2version){
     refreshenv
 
     & pm2
-    Copy-Item "$($HOME)\.pm2" -Destination "$pm2Path\.pm2" -Force
+    # If HOMEPATH is not set pm2 defaults to C:\etc\.pm2.
+    $homePm2 = "$($HOME)\.pm2"
+    $homePm2Exists = Test-Path -Path $homePm2
+    if (-not $homePm2Exists) {
+        $homePm2 = "C:\etc\.pm2"
+    }
+    Copy-Item "$homePm2" -Destination "$pm2Path\.pm2" -Force
     [Environment]::SetEnvironmentVariable('PM2_HOME', "$pm2Path\.pm2", 'Machine')
     refreshenv
 
