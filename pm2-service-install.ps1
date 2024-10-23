@@ -133,6 +133,7 @@ if($null -eq $pm2version){
     if($isOffline) {
         Write-host "install pm2 logrotate offline"
 
+        mkdir -Path "$pm2Path\.pm2\modules"
         Set-Location -Path "$pm2Path\.pm2\modules"
         tar -xzvf "$offlineFolder\logrotate.tar.gz"
         & pm2 module:generate pm2-logrotate
